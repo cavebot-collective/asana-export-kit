@@ -35,9 +35,16 @@ def parser():
     export.add_argument("--task", action="append", type=gid, default=[], help="Known orphan task seed; repeatable")
     export.add_argument("--project", action="append", type=gid, default=[], help="Additional project seed; repeatable")
     export.add_argument("--download-attachments", action="store_true")
+    export.add_argument("--max-attachment-bytes", type=int, default=0, help="Optional per-file ceiling; 0 means no fixed ceiling (default)")
+    export.add_argument("--extended", action="store_true", help="Also discover project/task templates and hydrate unified memberships")
     export.add_argument("--skip-time-entries", action="store_true")
     export.add_argument("--rpm", type=float, default=120)
     export.add_argument("--prompt-token", action="store_true", help="Read token without echoing or adding it to shell history")
+    export.add_argument("--oauth", action="store_true", help="Browser login with a registered OAuth app and PKCE; auto-refresh during this run")
+    export.add_argument("--oauth-client-id", default=os.environ.get("ASANA_CLIENT_ID", ""))
+    export.add_argument("--oauth-scopes", default=os.environ.get("ASANA_OAUTH_SCOPES", ""), help="Space-separated registered :read scopes")
+    export.add_argument("--oauth-redirect-uri", default="http://127.0.0.1:8765/callback")
+    export.add_argument("--oauth-no-browser", action="store_true", help="Print authorization URL without opening the browser")
     export.add_argument("--allow-partial", action="store_true", help="Return 0 for a written partial archive, instead of 2")
     norm = sub.add_parser("normalize-connector", help="Convert JSON arrays of connector capture records")
     norm.add_argument("--capture", type=Path, nargs="+", required=True)
@@ -48,12 +55,35 @@ def parser():
     pack = sub.add_parser("zip", help="Verify and package an archive; destination must be outside it")
     pack.add_argument("directory", type=Path)
     pack.add_argument("destination", type=Path)
+    bench = sub.add_parser("benchmark", help="Run deterministic local synthetic benchmarks; no Asana requests")
+    bench.add_argument("--out", type=Path, required=True)
+    bench.add_argument("--tasks", type=int, default=1000)
+    bench.add_argument("--comments", type=int, default=5)
+    bench.add_argument("--attachment-bytes", type=int, default=0, help="Optional sparse-file integrity benchmark")
+    profile = sub.add_parser("profile", help="Print aggregate workload statistics from an existing verified archive")
+    profile.add_argument("directory", type=Path)
+    compare = sub.add_parser("compare", help="Compare two verified archives; does not certify a transaction")
+    compare.add_argument("left", type=Path)
+    compare.add_argument("right", type=Path)
     return p
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "benchmark":
+            from .benchmarks import run_benchmark
+            print(json.dumps(run_benchmark(args.out, args.tasks, args.comments, args.attachment_bytes), indent=2))
+            return 0
+        if args.command == "profile":
+            from .benchmarks import profile_archive
+            print(json.dumps(profile_archive(args.directory), indent=2))
+            return 0
+        if args.command == "compare":
+            from .consistency import compare_archives
+            result = compare_archives(args.left, args.right)
+            print(json.dumps(result, indent=2))
+            return 0 if result["observed_equal"] else 2
         if args.command in ("verify", "zip"):
             issues = verify(args.directory)
             if issues:
@@ -91,10 +121,22 @@ def main(argv=None):
                     atomic(root / "raw" / f"connector-{index:04}.json", data)
                 export = normalize_connector(records)
             else:
-                token = getpass.getpass("Asana access token: ") if args.prompt_token else os.environ.get("ASANA_ACCESS_TOKEN", "")
+                if args.oauth and args.prompt_token:
+                    raise ValueError("Choose --oauth or --prompt-token")
+                if args.oauth:
+                    from .oauth import login
+                    secret = os.environ.get("ASANA_CLIENT_SECRET") or getpass.getpass("OAuth app client secret: ")
+                    session = login(args.oauth_client_id, secret, args.oauth_scopes, args.oauth_redirect_uri,
+                        open_browser=not args.oauth_no_browser)
+                    token = session.token
+                else:
+                    token = getpass.getpass("Asana access token: ") if args.prompt_token else os.environ.get("ASANA_ACCESS_TOKEN", "")
                 client = Client(token, rpm=args.rpm)
                 archive = Archive(root, client)
-                exporter = Exporter(archive, attachments=args.download_attachments, time_entries=not args.skip_time_entries)
+                if args.max_attachment_bytes < 0:
+                    raise ValueError("--max-attachment-bytes cannot be negative")
+                exporter = Exporter(archive, attachments=args.download_attachments, time_entries=not args.skip_time_entries,
+                    max_attachment_bytes=args.max_attachment_bytes or None, extended=args.extended)
                 if args.skip_time_entries:
                     exporter.gaps.append("Time tracking entries intentionally skipped by --skip-time-entries")
                 export = exporter.run(args.workspace, args.task, args.project)

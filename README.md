@@ -18,6 +18,8 @@ python -m asana_export_kit export --out ../asana-archive --prompt-token --downlo
 
 Create a personal access token in the [Asana developer console](https://app.asana.com/0/my-apps). The prompt hides your token and keeps it out of shell history. Alternatively supply `ASANA_ACCESS_TOKEN` through your environment or secret manager. Do not paste tokens into issues, chat, command-line arguments, or committed files. OAuth access tokens work through the same environment variable when their granted scopes permit the reads.
 
+Version 0.2 adds browser OAuth login with PKCE and automatic refresh during the run, optional template/membership collection, configurable attachment limits, archive comparison, and reproducible local benchmarks. See [authentication and extension details](docs/EXTENSIONS.md) and [benchmark results](benchmarks/README.md). OAuth requires a registered application; no username/password is sent to this exporter.
+
 On Windows, `py -3` may be used in place of `python`. No Node.js installation is needed for the normal exporter.
 
 Optional installation:
@@ -53,6 +55,7 @@ The REST collector discovers all accessible workspaces (or repeated `--workspace
 - Project tasks, tasks assigned to visible users, user task lists, tagged tasks, explicit task seeds, recursive subtasks, parents, dependencies and dependents. Completed tasks are included.
 - Task descriptions, dates, completion, memberships, selected custom-field values, followers, paginated stories/comments/activity, optional time tracking entries, attachment metadata and optional bytes.
 - Workspace users and teams, team memberships, tags, custom-field definitions, time periods, portfolios owned by visible users (including nested portfolios), goals, goal relationships, and their status updates.
+- With `--extended`: project templates, task templates, and individual unified memberships for projects, portfolios, and goals. This collects the fields returned by their detail endpoints, not a promise of complete template recreation.
 
 Every list operation follows `next_page.offset`. It does not follow server-supplied pagination URLs. Graph traversal deduplicates by object kind and GID, so cycles and multi-homed tasks do not loop indefinitely.
 
@@ -65,7 +68,7 @@ Unsupported or inaccessible endpoints are recorded and collection continues. Inv
 - Messages/inbox, deleted records, rules, forms, dashboards, audit logs, app configuration and revision histories are outside this version's coverage.
 - Portfolios/goals/time tracking and other features remain subject to account capabilities. The exporter records denials rather than requesting a different identity or circumventing a gate.
 - Data may change during collection. This is a time-spanning archive, not a transactional snapshot or a ready-to-import disaster-recovery backup.
-- Linked external files may need a different service's login. Metadata is retained when file bytes cannot be downloaded. Attachments over 1 GiB are reported as unavailable by this version.
+- Linked external files may need a different service's login. Metadata is retained when file bytes cannot be downloaded. There is no fixed attachment-size ceiling by default; set `--max-attachment-bytes N` for an optional per-file budget. Downloads and checksum verification stream file bytes; metadata rendering still uses memory proportional to the dataset.
 
 ## Resume, verify, package
 
@@ -78,6 +81,8 @@ python -m asana_export_kit zip ../asana-archive ../asana-archive.zip
 ```
 
 Completed operations are reused after hash checks. Incomplete list operations restart at page one, avoiding expired cursor reuse. Failed operations are retried on the next run. A fresh identity request prevents resuming an archive under a different account. Start a new directory for a fresh snapshot; resume does not refresh already completed task/project operations. Attachment URLs are refreshed before downloads. Historical failure files remain as provenance even if a later attempt succeeds; `coverage.json` lists failures in the current traversal.
+
+To resume a **v0.1.0** REST archive, retain its original options and add `--max-attachment-bytes 1073741824`. New settings such as unlimited attachments or `--extended` require a new output directory. A failed attachment transfer restarts from byte zero; HTTP Range/ETag resume is not implemented.
 
 Only one writer may use an output directory. If a process was killed, confirm it is no longer running before removing a stale `.export.lock`. SIGINT leaves completed operations available for resume.
 
@@ -117,7 +122,7 @@ python -m unittest discover -s tests -v
 node --test tests/connector.test.mjs
 ```
 
-Tests use synthetic data and mocked HTTP. They cover pagination, interruption/resume, permission failures, graph cycles, archived/completed/orphan tasks, identity mismatch, rate-limit retries, attachment redirect handling, private-network rejection, CSV formulas, and manifest integrity. The connector workflow has been exercised against a real account. The REST traversal has **not yet been exercised end-to-end against a live personal access token**; this distinction matters when assessing v0.1.0.
+Tests use synthetic data and mocked HTTP. They cover pagination, interruption/resume, permission failures, graph cycles, archived/completed/orphan tasks, identity mismatch, rate-limit retries, attachment redirect handling, private-network rejection, CSV formulas, manifest integrity, OAuth PKCE/state/refresh rotation, configurable file limits, streamed hashing, archive comparison, and extended endpoint traversal. The connector workflow has been exercised against a real account. The REST traversal and OAuth flow have **not yet been exercised end-to-end against a live credential**; this distinction matters when assessing v0.2.0.
 
 ## References
 

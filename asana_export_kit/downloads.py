@@ -30,7 +30,9 @@ class PinnedHTTPS(http.client.HTTPSConnection):
         self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
 
 
-def download_attachment(root, attachment, max_bytes=1024 * 1024 * 1024):
+def download_attachment(root, attachment, max_bytes=None):
+    if max_bytes is not None and max_bytes < 0:
+        raise ValueError("max_bytes must be nonnegative or None")
     url = attachment.get("download_url")
     if not url:
         raise ValueError("No downloadable URL; external linked file")
@@ -45,7 +47,7 @@ def download_attachment(root, attachment, max_bytes=1024 * 1024 * 1024):
             conn = PinnedHTTPS(parsed.hostname, ip)
             try:
                 conn.request("GET", urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, "")),
-                    headers={"User-Agent": "asana-export-kit/0.1.0", "Accept-Encoding": "identity"})
+                    headers={"User-Agent": "asana-export-kit/0.2.0", "Accept-Encoding": "identity"})
                 response = conn.getresponse()
                 if response.status in (301, 302, 303, 307, 308):
                     location = response.getheader("Location")
@@ -56,7 +58,7 @@ def download_attachment(root, attachment, max_bytes=1024 * 1024 * 1024):
                 if response.status != 200:
                     raise ValueError("Attachment HTTP " + str(response.status))
                 length = response.getheader("Content-Length")
-                if length and int(length) > max_bytes:
+                if length and max_bytes is not None and int(length) > max_bytes:
                     raise ValueError("Attachment exceeds size limit")
                 total = 0
                 with open(tmp, "wb") as f:
@@ -65,7 +67,7 @@ def download_attachment(root, attachment, max_bytes=1024 * 1024 * 1024):
                         if not chunk:
                             break
                         total += len(chunk)
-                        if total > max_bytes:
+                        if max_bytes is not None and total > max_bytes:
                             raise ValueError("Attachment exceeds size limit")
                         f.write(chunk)
                 if length and total != int(length):

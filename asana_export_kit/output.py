@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from .core import atomic, digest, encode, now, LIMITATIONS
+from .core import atomic, digest, encode, now, LIMITATIONS, hash_file
 
 
 def cell(value):
@@ -27,8 +27,8 @@ def manifest(root):
         if p.is_file() and p.name not in ("manifest.json", ".export.lock") and not p.name.endswith((".tmp", ".part")):
             if p.is_symlink():
                 raise ValueError("Archive must not contain symlinks")
-            data = p.read_bytes()
-            files.append({"path": p.relative_to(root).as_posix(), "bytes": len(data), "sha256": digest(data)})
+            size, sha256 = hash_file(p)
+            files.append({"path": p.relative_to(root).as_posix(), "bytes": size, "sha256": sha256})
     atomic(root / "manifest.json", encode({"schema_version": 1, "algorithm": "sha256", "files": files}))
 
 
@@ -45,7 +45,7 @@ def verify(root):
         listed.add(path)
         if not p.is_file():
             issues.append("Missing: " + path)
-        elif p.stat().st_size != item["bytes"] or digest(p.read_bytes()) != item["sha256"]:
+        elif p.stat().st_size != item["bytes"] or hash_file(p)[1] != item["sha256"]:
             issues.append("Changed: " + path)
     actual = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and p.name not in ("manifest.json", ".export.lock")}
     issues += ["Unlisted: " + p for p in sorted(actual - listed)]

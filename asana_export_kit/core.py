@@ -24,6 +24,16 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def hash_file(path, chunk_size=1024 * 1024):
+    """Bounded-memory integrity hashing, including multi-gigabyte attachments."""
+    h, size = hashlib.sha256(), 0
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(chunk_size), b""):
+            size += len(chunk)
+            h.update(chunk)
+    return size, h.hexdigest()
+
+
 def encode(data):
     return (json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
 
@@ -88,8 +98,9 @@ class Client:
         for attempt in range(self.retries + 1):
             self.sleep(max(0, self.interval - (time.monotonic() - self.last)))
             self.last = time.monotonic()
-            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + self.token,
-                "Accept": "application/json", "User-Agent": "asana-export-kit/0.1.0"}, method="GET")
+            token = self.token() if callable(self.token) else self.token
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token,
+                "Accept": "application/json", "User-Agent": "asana-export-kit/0.2.0"}, method="GET")
             try:
                 with self.opener.open(req, timeout=60) as response:
                     body = json.load(response)
@@ -189,9 +200,12 @@ LIMITATIONS = [
 
 
 class Exporter:
-    def __init__(self, archive, attachments=False, time_entries=True):
+    def __init__(self, archive, attachments=False, time_entries=True, max_attachment_bytes=None, extended=False):
         self.a, self.download, self.time_entries = archive, attachments, time_entries
+        self.max_attachment_bytes, self.extended = max_attachment_bytes, extended
         self.objects, self.edges, self.gaps = {}, [], list(LIMITATIONS)
+        if not extended:
+            self.gaps.append("Project/task templates and unified membership detail are omitted; enable --extended to collect them.")
         self.pending, self.seen = deque(), set()
 
     def enqueue(self, kind, value):
@@ -235,9 +249,13 @@ class Exporter:
             raise ValueError("Could not retrieve identity")
         meta_path = self.a.root / "run.json"
         config = {"principal": me["gid"], "workspaces": sorted(workspaces), "task_seeds": sorted(tasks),
-            "project_seeds": sorted(projects), "download_attachments": self.download, "time_entries": self.time_entries}
+            "project_seeds": sorted(projects), "download_attachments": self.download, "time_entries": self.time_entries,
+            "max_attachment_bytes": self.max_attachment_bytes, "extended": self.extended}
         if meta_path.exists():
             meta = json.loads(meta_path.read_text())
+            # v0.1.0 resumes retain their original attachment cap and coverage.
+            meta["config"].setdefault("max_attachment_bytes", 1024 ** 3)
+            meta["config"].setdefault("extended", False)
             if meta["config"] != config:
                 raise ValueError("Resume configuration/principal differs; use a new output directory")
         else:
@@ -278,6 +296,8 @@ class Exporter:
             for archived in (False, True):
                 self.children(f"/workspaces/{id_}/projects", {"archived": archived}, "projects")
             self.children("/goals", {"workspace": id_}, "goals")
+            if self.extended:
+                self.children("/project_templates", {"workspace": id_}, "project_templates")
             for user in users:
                 u = gid(user["gid"])
                 self.children("/tasks", {"workspace": id_, "assignee": u, "completed_since": EPOCH}, "tasks")
@@ -301,6 +321,9 @@ class Exporter:
             self.listing(f"/projects/{id_}/project_memberships", kind="project_memberships", parent=id_)
             self.listing(f"/projects/{id_}/custom_field_settings", kind="custom_field_settings", parent=id_)
             self.children(f"/projects/{id_}/tasks", {"completed_since": EPOCH}, "tasks", id_, "tasks")
+            if self.extended:
+                self.children("/task_templates", {"project": id_}, "task_templates", id_, "task_templates")
+                self.children("/memberships", {"parent": id_}, "memberships", id_, "memberships")
             self.statuses(id_)
             self.attachments(id_)
         elif kind == "tasks":
@@ -334,6 +357,8 @@ class Exporter:
                     self.gaps.append("Unknown portfolio item type: " + str(item.get("resource_type")))
             self.listing(f"/portfolios/{id_}/portfolio_memberships", kind="portfolio_memberships", parent=id_)
             self.statuses(id_)
+            if self.extended:
+                self.children("/memberships", {"parent": id_}, "memberships", id_, "memberships")
         elif kind == "goals":
             self.one(kind, id_)
             relationships = self.listing("/goal_relationships", {"supported_goal": id_,
@@ -344,6 +369,8 @@ class Exporter:
                 if target:
                     self.enqueue(target, support["gid"])
             self.statuses(id_)
+            if self.extended:
+                self.children("/memberships", {"parent": id_}, "memberships", id_, "memberships")
         elif kind == "attachments":
             a = self.one(kind, id_)
             if a and self.download:
@@ -353,7 +380,7 @@ class Exporter:
                 if fresh:
                     a.update(fresh)
                 try:
-                    a["local_file"] = download_attachment(self.a.root, a)
+                    a["local_file"] = download_attachment(self.a.root, a, max_bytes=self.max_attachment_bytes)
                 except (ValueError, OSError) as exc:
                     self.gaps.append(f"Attachment {id_}: {type(exc).__name__}; bytes unavailable")
             elif a:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asana-export-kit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Read-only Asana archives with resumable collection and explicit coverage"
 requires-python = ">=3.10"
 license = {text = "MIT"}

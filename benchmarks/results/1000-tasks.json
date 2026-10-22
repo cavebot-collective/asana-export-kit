@@ -1,0 +1,35 @@
+{
+  "archive_bytes": 3686831,
+  "at": "2026-10-22T18:36:32.239316+00:00",
+  "caveats": [
+    "Python allocator peak, not process RSS",
+    "Tracemalloc overhead included",
+    "Single run; filesystem cache uncontrolled",
+    "No API latency, throttling, retries or download bandwidth measured"
+  ],
+  "integrity_errors": [],
+  "kind": "local-synthetic",
+  "large_file": {
+    "bytes_read": 1074790400,
+    "fixture": "sparse zero-filled file; not network throughput",
+    "peak_python_bytes": 2102374,
+    "seconds": 3.261510012999679,
+    "sha256": "0e5784b2441347f7c1cbfe2ee03dd421ff87c3086fdf0ce280cf26cbcf114462"
+  },
+  "peak_python_bytes": 15869170,
+  "runtime": {
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.39",
+    "python": "3.12.14"
+  },
+  "schema_version": 1,
+  "shape": {
+    "comments_per_task": 5,
+    "projects": 10,
+    "tasks": 1000
+  },
+  "timings": {
+    "generate_seconds": 0.29345096800079773,
+    "render_and_manifest_seconds": 1.6576187319997189,
+    "verify_seconds": 0.0265367089996289
+  }
+}
