@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asana Export Kit — command builder</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;background:#101722;color:#e8eef5}*{box-sizing:border-box}body{margin:0}main{max-width:1000px;margin:auto;padding:36px 22px 70px}h1{font-size:2rem;margin:0}h2{font-size:1.1rem;margin-top:0}.sub{color:#adbdce;max-width:740px}fieldset,.result{border:1px solid #3a4b5f;border-radius:12px;padding:20px;margin:20px 0;background:#172230}legend{font-weight:650;padding:0 8px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}label{display:block}input:not([type=checkbox]),select,textarea{display:block;width:100%;padding:10px;margin-top:5px;background:#0c1420;color:#e8eef5;border:1px solid #5d7188;border-radius:6px;font:inherit}input[type=checkbox]{accent-color:#7de1c8;width:17px;height:17px;vertical-align:middle;margin-right:8px}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.hint{font-size:.88rem;color:#adbdce}.badge{display:inline-block;border:1px solid #437666;color:#9ae6d1;padding:3px 10px;border-radius:20px;font-size:.8rem;margin-bottom:12px}textarea{font:13px/1.6 ui-monospace,monospace;min-height:175px;resize:vertical}button{background:#93e5ce;color:#09241e;border:0;border-radius:6px;padding:10px 18px;font-weight:700;cursor:pointer;margin-top:12px}a{color:#9bddff}#error{color:#ffb6ac}details{margin-top:22px}summary{cursor:pointer}#copyState{margin-left:12px}input:focus,select:focus,textarea:focus,button:focus{outline:2px solid #93e5ce;outline-offset:3px}
+</style></head><body><main>
+<span class="badge">Offline • No credentials entered here</span>
+<h1>Build your Asana export</h1><p class="sub">Choose what to capture, then copy the command into your terminal. The command runs on your computer. This page makes no network requests and stores no settings.</p>
+<form id="builder">
+<fieldset><legend>1. Destination & access</legend><div class="grid">
+<label>Output folder<input id="output" value="../asana-archive" required></label>
+<label>Workspace IDs — optional<input id="workspaces" placeholder="All accessible workspaces"></label>
+<label>Authentication<select id="auth"><option value="prompt">Hidden token prompt</option><option value="env">ASANA_ACCESS_TOKEN environment variable</option><option value="oauth">Browser OAuth — registered app required</option></select></label>
+<label>Requests per minute<input id="rpm" type="number" min="1" value="120"></label></div>
+<p class="hint">OAuth currently uses your own app registration. Shared Kit sign-in is not yet hosted. Never put a token in the generated command.</p></fieldset>
+<fieldset><legend>2. Capture</legend>
+<p class="hint">Core capture always includes accessible projects, tasks, their relationships, people, teams, tags and custom fields. Embedded references may remain even when a separate category is omitted.</p>
+<div class="checks">
+<label><input type="checkbox" id="stories" checked>Comments & activity</label>
+<label><input type="checkbox" id="attachments" checked>Attachment metadata</label>
+<label><input type="checkbox" id="downloads">Download attachment files</label>
+<label><input type="checkbox" id="timeEntries" checked>Time entries</label>
+<label><input type="checkbox" id="portfolios" checked>Portfolios</label>
+<label><input type="checkbox" id="goals" checked>Goals</label>
+<label><input type="checkbox" id="statuses" checked>Status updates</label>
+<label><input type="checkbox" id="briefs" checked>Project briefs</label>
+<label><input type="checkbox" id="extended">Templates & detailed memberships</label></div>
+<label style="margin-top:16px">Maximum bytes per attachment — 0 is unlimited<input id="maxBytes" type="number" min="0" value="0"></label>
+<p class="hint">These controls select implemented collectors. Messages/inbox, trash, rules, forms, dashboards, audit logs, app settings and prior revisions need additional adapters.</p>
+<label><input type="checkbox" id="acceptPartial">Return exit code 0 for a completed partial export</label></fieldset>
+<fieldset><legend>3. Remote copy & repetition</legend><div class="grid">
+<label>rclone remote — optional<input id="remote" placeholder="drive:Asana-backups"></label>
+<label>Requested interval in seconds<input id="interval" type="number" min="1" value="3600"></label>
+<label>Number of runs — 0 keeps running<input id="runs" type="number" min="0" value="0"></label></div>
+<p class="hint">Configure the remote with rclone first. Each completed archive gets its own destination and a byte verification pass. This can incur download traffic.</p>
+<label><input type="checkbox" id="schedule">Repeat as fresh snapshots</label>
+<p class="hint">Runs never overlap. If collection plus transfer takes longer than the requested interval, the next run starts after completion. Keep the process running. Failure stops the loop and retains its files.</p></fieldset>
+</form>
+<section class="result" aria-labelledby="command-title"><h2 id="command-title">Your command</h2>
+<label>Terminal<select id="shell"><option value="powershell">PowerShell — Windows</option><option value="posix">Bash / POSIX shell</option></select></label>
+<p id="error" role="alert"></p><textarea id="command" readonly aria-label="Generated command" spellcheck="false"></textarea>
+<button type="button" id="copy">Copy command</button><span id="copyState" role="status"></span>
+<details><summary>Exact argument array</summary><pre id="argv" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
+<details><summary>Extraction and purge are separate phases</summary><p>Create a purge plan after extraction with <code>purge-plan</code>, review its exact task IDs and blockers, then use <code>purge-apply</code> with that plan ID. Only isolated leaf tasks are currently eligible. Export, upload and interval runs never delete source data. See the repository's operations guide for the full workflow.</p></details>
+<p class="hint"><a href="https://github.com/cavebot-collective/asana-export-kit">Source and documentation</a> · Asana Export Kit</p>
+</main><script src="builder.js"></script><script>
+const form=document.getElementById('builder'),output=document.getElementById('command'),error=document.getElementById('error');
+function update(){try{const c={};for(const element of form.elements)if(element.id)c[element.id]=element.type==='checkbox'?element.checked:element.value;document.getElementById('downloads').disabled=!c.attachments;const args=AsanaBuilder.build(c);output.value=AsanaBuilder.command(args,document.getElementById('shell').value);document.getElementById('argv').textContent=JSON.stringify(args,null,2);error.textContent='';document.getElementById('copy').disabled=false;}catch(e){error.textContent=e.message;output.value='';document.getElementById('argv').textContent='';document.getElementById('copy').disabled=true;}}
+form.addEventListener('input',update);document.getElementById('shell').addEventListener('change',update);document.getElementById('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(output.value);document.getElementById('copyState').textContent='Copied';}catch{output.focus();output.select();document.getElementById('copyState').textContent='Select and copy the highlighted command';}});update();
+</script></body></html>

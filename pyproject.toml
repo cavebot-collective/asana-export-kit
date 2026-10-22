@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asana-export-kit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Read-only Asana archives with resumable collection and explicit coverage"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -15,3 +15,6 @@ asana-export = "asana_export_kit.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["asana_export_kit*"]
+
+[tool.setuptools.package-data]
+asana_export_kit = ["web/*.html", "web/*.js"]

@@ -47,7 +47,7 @@ def download_attachment(root, attachment, max_bytes=None):
             conn = PinnedHTTPS(parsed.hostname, ip)
             try:
                 conn.request("GET", urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, "")),
-                    headers={"User-Agent": "asana-export-kit/0.2.0", "Accept-Encoding": "identity"})
+                    headers={"User-Agent": "asana-export-kit/0.3.0", "Accept-Encoding": "identity"})
                 response = conn.getresponse()
                 if response.status in (301, 302, 303, 307, 308):
                     location = response.getheader("Location")

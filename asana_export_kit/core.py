@@ -100,7 +100,7 @@ class Client:
             self.last = time.monotonic()
             token = self.token() if callable(self.token) else self.token
             req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token,
-                "Accept": "application/json", "User-Agent": "asana-export-kit/0.2.0"}, method="GET")
+                "Accept": "application/json", "User-Agent": "asana-export-kit/0.3.0"}, method="GET")
             try:
                 with self.opener.open(req, timeout=60) as response:
                     body = json.load(response)
@@ -200,16 +200,22 @@ LIMITATIONS = [
 
 
 class Exporter:
-    def __init__(self, archive, attachments=False, time_entries=True, max_attachment_bytes=None, extended=False):
+    def __init__(self, archive, attachments=False, time_entries=True, max_attachment_bytes=None, extended=False, omit=()):
         self.a, self.download, self.time_entries = archive, attachments, time_entries
         self.max_attachment_bytes, self.extended = max_attachment_bytes, extended
+        self.omit = set(omit)
+        if self.omit - {"stories", "attachments", "portfolios", "goals", "statuses", "briefs"}:
+            raise ValueError("Unknown capture category")
+        if attachments and "attachments" in self.omit:
+            raise ValueError("Attachment downloads require attachment metadata")
         self.objects, self.edges, self.gaps = {}, [], list(LIMITATIONS)
         if not extended:
             self.gaps.append("Project/task templates and unified membership detail are omitted; enable --extended to collect them.")
+        self.gaps.extend("Intentionally omitted category: " + category for category in sorted(self.omit))
         self.pending, self.seen = deque(), set()
 
     def enqueue(self, kind, value):
-        if value:
+        if value and kind not in self.omit:
             self.pending.append((kind, gid(value)))
 
     def put(self, kind, obj):
@@ -237,9 +243,13 @@ class Exporter:
         return rows
 
     def statuses(self, id_):
+        if "statuses" in self.omit:
+            return
         self.children("/status_updates", {"parent": id_}, "status_updates", id_, "status_updates")
 
     def attachments(self, id_):
+        if "attachments" in self.omit:
+            return
         self.children("/attachments", {"parent": id_}, "attachments", id_, "attachments")
 
     def run(self, workspaces=(), tasks=(), projects=()):
@@ -250,12 +260,13 @@ class Exporter:
         meta_path = self.a.root / "run.json"
         config = {"principal": me["gid"], "workspaces": sorted(workspaces), "task_seeds": sorted(tasks),
             "project_seeds": sorted(projects), "download_attachments": self.download, "time_entries": self.time_entries,
-            "max_attachment_bytes": self.max_attachment_bytes, "extended": self.extended}
+            "max_attachment_bytes": self.max_attachment_bytes, "extended": self.extended, "omit": sorted(self.omit)}
         if meta_path.exists():
             meta = json.loads(meta_path.read_text())
             # v0.1.0 resumes retain their original attachment cap and coverage.
             meta["config"].setdefault("max_attachment_bytes", 1024 ** 3)
             meta["config"].setdefault("extended", False)
+            meta["config"].setdefault("omit", [])
             if meta["config"] != config:
                 raise ValueError("Resume configuration/principal differs; use a new output directory")
         else:
@@ -295,13 +306,15 @@ class Exporter:
             self.listing("/time_periods", {"workspace": id_}, "time_periods")
             for archived in (False, True):
                 self.children(f"/workspaces/{id_}/projects", {"archived": archived}, "projects")
-            self.children("/goals", {"workspace": id_}, "goals")
+            if "goals" not in self.omit:
+                self.children("/goals", {"workspace": id_}, "goals")
             if self.extended:
                 self.children("/project_templates", {"workspace": id_}, "project_templates")
             for user in users:
                 u = gid(user["gid"])
                 self.children("/tasks", {"workspace": id_, "assignee": u, "completed_since": EPOCH}, "tasks")
-                self.children("/portfolios", {"workspace": id_, "owner": u}, "portfolios")
+                if "portfolios" not in self.omit:
+                    self.children("/portfolios", {"workspace": id_, "owner": u}, "portfolios")
                 task_list = self.a.operation(f"/users/{u}/user_task_list", {"workspace": id_})
                 if task_list:
                     self.put("user_task_lists", task_list)
@@ -316,7 +329,8 @@ class Exporter:
             extra = self.a.operation(f"/projects/{id_}", {"opt_fields": "project_brief,html_notes,custom_field_settings.custom_field.name"})
             if extra:
                 p.update(extra)
-            self.enqueue("project_briefs", (p.get("project_brief") or {}).get("gid"))
+            if "briefs" not in self.omit:
+                self.enqueue("project_briefs", (p.get("project_brief") or {}).get("gid"))
             self.listing(f"/projects/{id_}/sections", kind="sections", parent=id_)
             self.listing(f"/projects/{id_}/project_memberships", kind="project_memberships", parent=id_)
             self.listing(f"/projects/{id_}/custom_field_settings", kind="custom_field_settings", parent=id_)
@@ -336,7 +350,8 @@ class Exporter:
             self.enqueue("tasks", (t.get("parent") or {}).get("gid"))
             for sub in ("subtasks", "dependencies", "dependents"):
                 self.children(f"/tasks/{id_}/{sub}", {}, "tasks", id_, sub)
-            self.listing(f"/tasks/{id_}/stories", {"opt_fields": STORY_FIELDS}, "stories", id_)
+            if "stories" not in self.omit:
+                self.listing(f"/tasks/{id_}/stories", {"opt_fields": STORY_FIELDS}, "stories", id_)
             if self.time_entries:
                 self.listing(f"/tasks/{id_}/time_tracking_entries",
                     {"opt_fields": "gid,duration_minutes,entered_on,created_by.name,assignee.name,attributable_to.name"}, "time_tracking_entries", id_)

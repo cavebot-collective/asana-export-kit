@@ -8,3 +8,7 @@ dist/
 exports/
 private-export/
 *.zip
+snapshots/
+purge-*.json
+*.upload.json
+.purge-*.lock

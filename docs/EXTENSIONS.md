@@ -1,5 +1,7 @@
 # Authentication, consistency, recovery, and coverage
 
+For features added after 0.2, see the [0.3 operations guide](OPERATIONS.md), including the experimental two-phase purge and offline command builder.
+
 Implemented in 0.2: OAuth login/refresh, configurable attachment limits, streaming integrity checks, template and membership reads, archive comparison, local benchmarks and profiling. Event-driven reconciliation, a restore writer, persistent credential storage, and browser collection adapters are designs below, not implemented features.
 
 ## Browser sign-in instead of a manually copied token

@@ -26,7 +26,7 @@ def lock(root):
 
 
 def parser():
-    p = argparse.ArgumentParser(description="Read-only Asana export with honest coverage and resumable operations")
+    p = argparse.ArgumentParser(description="Asana archives, verified storage handoff, scheduling, and explicit two-phase purge")
     sub = p.add_subparsers(dest="command", required=True)
     export = sub.add_parser("export", help="Collect directly through Asana REST")
     export.add_argument("--out", type=Path, required=True)
@@ -38,6 +38,9 @@ def parser():
     export.add_argument("--max-attachment-bytes", type=int, default=0, help="Optional per-file ceiling; 0 means no fixed ceiling (default)")
     export.add_argument("--extended", action="store_true", help="Also discover project/task templates and hydrate unified memberships")
     export.add_argument("--skip-time-entries", action="store_true")
+    export.add_argument("--omit", action="append", choices=["stories", "attachments", "portfolios", "goals", "statuses", "briefs"], default=[])
+    export.add_argument("--remote", help="Configured rclone remote; copy and verify after sealing the archive")
+    export.add_argument("--rclone", default="rclone", help="rclone executable path")
     export.add_argument("--rpm", type=float, default=120)
     export.add_argument("--prompt-token", action="store_true", help="Read token without echoing or adding it to shell history")
     export.add_argument("--oauth", action="store_true", help="Browser login with a registered OAuth app and PKCE; auto-refresh during this run")
@@ -65,12 +68,70 @@ def parser():
     compare = sub.add_parser("compare", help="Compare two verified archives; does not certify a transaction")
     compare.add_argument("left", type=Path)
     compare.add_argument("right", type=Path)
+    gui = sub.add_parser("gui", help="Open the offline browser command builder")
+    gui.add_argument("--print-path", action="store_true")
+    upload = sub.add_parser("upload", help="Verify, copy with rclone, and verify remote bytes")
+    upload.add_argument("directory", type=Path)
+    upload.add_argument("remote")
+    upload.add_argument("--receipt", type=Path, required=True)
+    upload.add_argument("--rclone", default="rclone")
+    watch = sub.add_parser("watch", help="Serial fresh snapshots; interval includes collection and transfer")
+    watch.add_argument("--root", type=Path, required=True)
+    watch.add_argument("--interval", type=float, required=True, help="Requested start-to-start interval in seconds")
+    watch.add_argument("--runs", type=int, default=0, help="0 keeps running until stopped")
+    watch.add_argument("--prompt-token", action="store_true", help="Prompt once; pass token to child exports through environment")
+    watch.add_argument("--remote")
+    watch.add_argument("--rclone", default="rclone")
+    watch.add_argument("export_args", nargs=argparse.REMAINDER, help="Export options after --")
+    purge_plan = sub.add_parser("purge-plan", help="Prepare a reviewable plan; does not delete")
+    purge_plan.add_argument("directory", type=Path)
+    purge_plan.add_argument("--task", action="append", type=gid, required=True)
+    purge_plan.add_argument("--out", type=Path, required=True)
+    apply = sub.add_parser("purge-apply", help="Apply an exact, verified task deletion plan")
+    apply.add_argument("plan", type=Path)
+    apply.add_argument("--confirm", required=True, help="Exact plan_id from the reviewed plan")
+    apply.add_argument("--writers-paused", action="store_true")
+    apply.add_argument("--accept-coverage-limits", action="store_true")
+    apply.add_argument("--prompt-token", action="store_true", help="Separate deletion credential; otherwise ASANA_DELETE_TOKEN")
+    apply.add_argument("--rpm", type=float, default=120)
     return p
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "gui":
+            import webbrowser
+            path = Path(__file__).parent / "web" / "index.html"
+            print(str(path.resolve()))
+            if not args.print_path:
+                webbrowser.open(path.resolve().as_uri())
+            return 0
+        if args.command == "upload":
+            from .storage import upload_archive
+            print(json.dumps(upload_archive(args.directory, args.remote, args.receipt, args.rclone), indent=2))
+            return 0
+        if args.command == "watch":
+            from .schedule import watch
+            args.root.mkdir(parents=True, exist_ok=True)
+            env = dict(os.environ)
+            if args.prompt_token:
+                env["ASANA_ACCESS_TOKEN"] = getpass.getpass("Asana access token for scheduled reads: ")
+            forwarded = args.export_args[1:] if args.export_args[:1] == ["--"] else args.export_args
+            with lock(args.root):
+                watch(args.root, args.interval, forwarded, args.runs, args.remote, args.rclone, env)
+            return 0
+        if args.command == "purge-plan":
+            from .purge import save_plan
+            plan = save_plan(args.directory, args.task, args.out)
+            print(json.dumps({"plan_id": plan["plan_id"], "eligible": len(plan["targets"]), "blocked": plan["blocked"], "path": str(args.out)}, indent=2))
+            return 2 if plan["blocked"] else 0
+        if args.command == "purge-apply":
+            from .purge import DeleteClient, apply_plan
+            token = getpass.getpass("Asana deletion token: ") if args.prompt_token else os.environ.get("ASANA_DELETE_TOKEN", "")
+            print(json.dumps(apply_plan(args.plan, args.confirm, DeleteClient(token, rpm=args.rpm),
+                args.writers_paused, args.accept_coverage_limits), indent=2))
+            return 0
         if args.command == "benchmark":
             from .benchmarks import run_benchmark
             print(json.dumps(run_benchmark(args.out, args.tasks, args.comments, args.attachment_bytes), indent=2))
@@ -136,12 +197,15 @@ def main(argv=None):
                 if args.max_attachment_bytes < 0:
                     raise ValueError("--max-attachment-bytes cannot be negative")
                 exporter = Exporter(archive, attachments=args.download_attachments, time_entries=not args.skip_time_entries,
-                    max_attachment_bytes=args.max_attachment_bytes or None, extended=args.extended)
+                    max_attachment_bytes=args.max_attachment_bytes or None, extended=args.extended, omit=args.omit)
                 if args.skip_time_entries:
                     exporter.gaps.append("Time tracking entries intentionally skipped by --skip-time-entries")
                 export = exporter.run(args.workspace, args.task, args.project)
             counts = write_archive(root, export)
             print(json.dumps({"output": str(root), "counts": counts, "coverage": "partial"}))
+        if args.command == "export" and args.remote:
+            from .storage import upload_archive
+            print(json.dumps(upload_archive(root, args.remote, root.with_name(root.name + ".upload.json"), args.rclone), indent=2))
         return 0 if args.allow_partial else 2
     except KeyboardInterrupt:
         print("Interrupted. Completed REST operations are saved; rerun with --resume.", file=sys.stderr)

@@ -2,6 +2,8 @@
 
 Export the Asana data your account can read, using ordinary read-only API requests. No organization-export endpoint, Enterprise service account, paid export service, or runtime dependencies required.
 
+**Version 0.3:** an offline browser command builder (`gui`), category selection, serial interval snapshots (`watch`), verified rclone storage handoff (`upload` / `export --remote`), and a separate experimental two-phase task purge (`purge-plan`, `purge-apply`). Export never deletes source data. See the [operations guide](docs/OPERATIONS.md) for exact behavior and remaining validation limits.
+
 **An honest archive, not a claim of omniscience.** Asana's API does not expose every product feature or provide a universal free-plan task-discovery endpoint. This tool records failures and blind spots in `coverage.json`. It never equates permission denied with empty, or successful execution with a complete organization backup.
 
 Asana also has built-in **per-project CSV/JSON exports**. Its organization-wide export API is a different, Enterprise+ service-account feature. This project automates ordinary API reads; it does not bypass permissions or subscription restrictions.
@@ -66,6 +68,8 @@ Unsupported or inaccessible endpoints are recorded and collection continues. Inv
 - Your token sees only its account's accessible data. An admin title does not grant this tool access to everyone else's private tasks.
 - Unassigned, untagged, projectless tasks with no discovered graph connection are a discovery gap. Add known IDs with repeated `--task GID`; add project seeds with repeated `--project GID`.
 - Messages/inbox, deleted records, rules, forms, dashboards, audit logs, app configuration and revision histories are outside this version's coverage.
+
+  This is an implementation boundary. Much of their visible current state is a plausible authorized-browser capture target. See the [browser coverage assessment](docs/BROWSER-COVERAGE.md); site-specific collectors for those categories are not implemented yet.
 - Portfolios/goals/time tracking and other features remain subject to account capabilities. The exporter records denials rather than requesting a different identity or circumventing a gate.
 - Data may change during collection. This is a time-spanning archive, not a transactional snapshot or a ready-to-import disaster-recovery backup.
 - Linked external files may need a different service's login. Metadata is retained when file bytes cannot be downloaded. There is no fixed attachment-size ceiling by default; set `--max-attachment-bytes N` for an optional per-file budget. Downloads and checksum verification stream file bytes; metadata rendering still uses memory proportional to the dataset.
@@ -119,10 +123,10 @@ Normalization preserves the input bytes under `raw/`. Both the REST and connecto
 
 ```sh
 python -m unittest discover -s tests -v
-node --test tests/connector.test.mjs
+node --test tests/connector.test.mjs tests/builder.test.cjs
 ```
 
-Tests use synthetic data and mocked HTTP. They cover pagination, interruption/resume, permission failures, graph cycles, archived/completed/orphan tasks, identity mismatch, rate-limit retries, attachment redirect handling, private-network rejection, CSV formulas, manifest integrity, OAuth PKCE/state/refresh rotation, configurable file limits, streamed hashing, archive comparison, and extended endpoint traversal. The connector workflow has been exercised against a real account. The REST traversal and OAuth flow have **not yet been exercised end-to-end against a live credential**; this distinction matters when assessing v0.2.0.
+Tests use synthetic data and mocked HTTP. They cover pagination, interruption/resume, permission failures, graph cycles, archived/completed/orphan tasks, identity mismatch, rate-limit retries, attachment redirect handling, private-network rejection, CSV formulas, manifest integrity, OAuth PKCE/state/refresh rotation, configurable file limits, streamed hashing, archive comparison, and extended endpoint traversal. The connector workflow has been exercised against a real account. The REST traversal and OAuth flow have **not yet been exercised end-to-end against a live credential**; this distinction matters when assessing v0.3.0.
 
 ## References
 
