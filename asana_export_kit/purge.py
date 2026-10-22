@@ -213,6 +213,8 @@ def apply_plan(plan_path, confirmation, client, writers_paused=False, accept_lim
             if verify(root) or hash_file(root / "manifest.json")[1] != plan["manifest_sha256"]:
                 raise ValueError("Archive changed during purge")
             recheck(client, target)
+            if datetime.now(timezone.utc) >= datetime.fromisoformat(plan["expires_at"]):
+                raise ValueError("Purge plan expired during verification; no further deletion attempted")
             journal["items"][target["gid"]] = "intent"
             atomic(journal_path, encode(journal))
             client.delete_task(target["gid"])

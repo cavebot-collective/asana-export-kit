@@ -22,7 +22,9 @@ const assert = require('node:assert/strict');
     await page.locator('#auth').selectOption('prompt');
     await page.locator('#workspaces').fill('123,456');
     await page.locator('#remote').fill("drive:folder with 'quotes'");
-    const args = JSON.parse(await page.locator('#argv').innerText());
+    assert.equal(await page.locator('#error').textContent(), '');
+    // The argument preview is inside a collapsed <details>; read its DOM text.
+    const args = JSON.parse(await page.locator('#argv').textContent());
     const parsed = spawnSync('python', ['-c', 'import json,sys; from asana_export_kit.cli import parser; parser().parse_args(json.loads(sys.argv[1]))', JSON.stringify(args.slice(3))], {encoding:'utf8'});
     assert.equal(parsed.status, 0, parsed.stderr);
     await page.setViewportSize({width:390,height:844});

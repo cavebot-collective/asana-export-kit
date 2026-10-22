@@ -2,6 +2,7 @@ import copy
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -134,6 +135,22 @@ class Operations(unittest.TestCase):
             archive = fixture(root, source)
             plan = save_plan(archive, ["12"], root / "plan.json")
             self.assertIn("Attachment bytes missing", plan["blocked"][0]["reason"])
+
+    def test_purge_expiry_during_preflight_prevents_mutation(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, source = Path(d), Source()
+            archive = fixture(root, source); path = root / "plan.json"
+            plan = save_plan(archive, ["12"], path)
+            original = source.get; reads = [0]
+            def counting(path, params=None):
+                if path == "/tasks/12": reads[0] += 1
+                return original(path, params)
+            source.get = counting
+            with patch('asana_export_kit.purge.datetime', wraps=datetime) as clock:
+                clock.now.side_effect = lambda tz: datetime.now(tz) + timedelta(days=2 if reads[0] >= 4 else 0)
+                with self.assertRaisesRegex(ValueError, "expired"):
+                    apply_plan(path, plan["plan_id"], source, True, True)
+            self.assertEqual(source.deleted, [])
 
     def test_purge_blocks_missing_evidence_cascades_and_connector(self):
         for condition in ("evidence", "parent", "connector"):
